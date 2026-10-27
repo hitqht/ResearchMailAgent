@@ -26,6 +26,12 @@
 - 构建报告与校验值：本机忽略目录 `artifacts/build-app.json`、`artifacts/build-dmg.json`
   和 `dist/*.dmg.sha256`。最终交付记录包含实际 SHA 与 Git 引用。
 
+首次远端 CI 未分配到托管 ARM runner，在执行任何步骤前因容量限制取消；GitHub 的检查注解
+明确返回 “The job was not acquired by Runner of type hosted even after multiple attempts”。
+工作流改用官方支持的 `macos-15-intel` 标准 runner，最终结果由交付记录核验。
+本机交付仍是 arm64，构建脚本根据实际架构生成相应名称的 DMG。
+参考：[官方 runner 镜像表](https://github.com/actions/runner-images)。
+
 ## 主要文件
 
 `mail/{models,imap,mime}.py`、`security/credentials.py`、`services/mail_service.py`、
