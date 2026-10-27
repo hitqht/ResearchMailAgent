@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import QApplication
 
@@ -12,6 +13,10 @@ from researchmail.services.workspace import WorkspaceService
 
 def main() -> int:
     os.umask(0o077)
+    if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
+        from researchmail.diagnostics import self_test
+
+        return self_test(Path(sys.argv[2]))
     app = QApplication(sys.argv)
     app.setApplicationName("ResearchMailAgent")
     app.setApplicationDisplayName("ResearchMail Agent")

@@ -16,8 +16,8 @@ from researchmail.storage.database import (
 
 def test_initialization_idempotency_permissions_and_schema(paths: AppPaths) -> None:
     db = Database(paths.database)
-    assert db.initialize() == 2
-    assert db.initialize() == 2
+    assert db.initialize() == len(packaged_migrations())
+    assert db.initialize() == len(packaged_migrations())
     assert paths.database.stat().st_mode & 0o777 == 0o600
     with db.connection() as conn:
         assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
@@ -34,7 +34,9 @@ def test_initialization_idempotency_permissions_and_schema(paths: AppPaths) -> N
             "schema_migrations",
             "app_settings",
         } <= tables
-        assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 2
+        assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == len(
+            packaged_migrations()
+        )
 
 
 def test_upgrade_preserves_existing_data(paths: AppPaths) -> None:
@@ -43,7 +45,7 @@ def test_upgrade_preserves_existing_data(paths: AppPaths) -> None:
     db.initialize(migrations[:1])
     with db.transaction() as conn:
         conn.execute("INSERT INTO accounts(email) VALUES (?)", ("fixture@example.invalid",))
-    assert db.initialize() == 2
+    assert db.initialize() == len(packaged_migrations())
     with db.connection() as conn:
         assert conn.execute("SELECT email FROM accounts").fetchone()[0] == "fixture@example.invalid"
 
@@ -51,16 +53,18 @@ def test_upgrade_preserves_existing_data(paths: AppPaths) -> None:
 def test_atomic_failed_migration_and_retry(paths: AppPaths) -> None:
     db = Database(paths.database)
     db.initialize()
-    broken = Migration(3, "003_broken.sql", "CREATE TABLE attempt(id);\nINVALID SQL;\n")
+    broken = Migration(4, "004_broken.sql", "CREATE TABLE attempt(id);\nINVALID SQL;\n")
     with pytest.raises(StorageError):
         db.initialize((*packaged_migrations(), broken))
     with db.connection() as conn:
-        assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == 2
+        assert conn.execute("SELECT count(*) FROM schema_migrations").fetchone()[0] == len(
+            packaged_migrations()
+        )
         assert (
             conn.execute("SELECT name FROM sqlite_master WHERE name='attempt'").fetchone() is None
         )
-    repaired = Migration(3, "003_fixed.sql", "CREATE TABLE attempt(id INTEGER);\n")
-    assert db.initialize((*packaged_migrations(), repaired)) == 3
+    repaired = Migration(4, "004_fixed.sql", "CREATE TABLE attempt(id INTEGER);\n")
+    assert db.initialize((*packaged_migrations(), repaired)) == 4
     with pytest.raises(StorageError, match="newer"):
         db.initialize()
 
