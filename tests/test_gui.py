@@ -13,7 +13,7 @@ from researchmail.services.workspace import WorkspaceService
 
 
 def wait_idle(qtbot: QtBot, window: MainWindow) -> None:
-    qtbot.waitUntil(lambda: not window.jobs, timeout=10000)
+    qtbot.waitUntil(lambda: not window.jobs and not window.mail_controller.jobs, timeout=10000)
 
 
 def test_start_navigation_onboarding_and_persistence(qtbot: QtBot, paths: AppPaths) -> None:

@@ -1,5 +1,20 @@
 # M0 架构与边界
 
+## M1 增量架构
+
+`gui/mail_widgets.py` → `gui/mail_controller.py` → `services/mail_service.py` →
+`mail/imap.py` / `storage/mail_repository.py` / `security/credentials.py`。
+控制器将所有存储、Keychain 与网络操作放入 Worker，UI 只接收快照、进度和固定错误码。
+服务层串行化账户和同步操作，连接失败按固定次数重试，每封邮件连同游标在一个事务内提交。
+只读适配器仅暴露 LIST、SELECT(readonly)、UID SEARCH/FETCH 与 LOGOUT，没有服务器写入接口。
+MIME 与 IMAP literal 均有大小限制，HTML 只转文本，QPlainTextEdit 不执行脚本、打开链接或请求远程图片。
+
+账户连接身份在有缓存后不可更换；UIDVALIDITY 变化保留旧消息，列表按当前游标代次过滤。
+Keychain 是唯一凭据后端；数据库仅存随机 credential_ref。授权码更新创建新引用，数据库提交
+失败时清理新条目；成功后尽力清理旧条目。拒绝清理可能留下孤立的 Keychain 条目，不会回退明文。
+
+下文保留 M0 基线说明；当前增量以 M1 报告为准。
+
 ```text
 gui/ (Qt widgets, signals, worker)
   → services/workspace.py (应用用例)

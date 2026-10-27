@@ -4,6 +4,7 @@ from PySide6.QtCore import QObject, QRunnable, Signal, Slot
 
 
 class WorkerSignals(QObject):
+    progress = Signal(int, int)
     succeeded = Signal(object)
     failed = Signal()
     finished = Signal()

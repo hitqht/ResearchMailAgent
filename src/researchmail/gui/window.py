@@ -20,8 +20,11 @@ from PySide6.QtWidgets import (
 
 from researchmail import __version__
 from researchmail.eventlog import Event, EventLog
+from researchmail.gui.mail_controller import MailController
+from researchmail.gui.mail_widgets import AccountEditor, MailBrowser
 from researchmail.gui.onboarding import OnboardingWizard
 from researchmail.gui.worker import Worker
+from researchmail.services.mail_service import MailService
 from researchmail.services.workspace import WorkspaceService, WorkspaceState
 
 NAVIGATION = ("今日", "邮件", "审稿与投稿", "待办", "草稿", "设置")
@@ -39,11 +42,21 @@ def text_label(text: str, size: int = 13, bold: bool = False) -> QLabel:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, service: WorkspaceService, event_log: EventLog | None = None) -> None:
+    def __init__(
+        self,
+        service: WorkspaceService,
+        event_log: EventLog | None = None,
+        mail_service: MailService | None = None,
+    ) -> None:
         super().__init__()
         self.service = service
         self.event_log = event_log
         self.pool = QThreadPool(self)
+        self.mail_controller = MailController(
+            mail_service if mail_service is not None else MailService(service.database),
+            self.pool,
+            self,
+        )
         self.jobs: set[Worker] = set()
         self.wizard: OnboardingWizard | None = None
         self.ready = False
@@ -66,8 +79,8 @@ class MainWindow(QMainWindow):
         self.navigation.addItems(NAVIGATION)
         self.navigation.setSpacing(7)
         side_layout.addWidget(self.navigation)
-        side_layout.addWidget(text_label(f"M0 工程预览 · {__version__}", 11))
-        side_layout.addWidget(text_label("本地工作区 · 尚未连接邮箱", 11))
+        side_layout.addWidget(text_label(f"M1 开发版 · {__version__}", 11))
+        side_layout.addWidget(text_label("本地缓存 · 邮箱 SSL 只读", 11))
         splitter.addWidget(sidebar)
 
         self.pages = QStackedWidget()
@@ -78,6 +91,7 @@ class MainWindow(QMainWindow):
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.navigation.setCurrentRow(0)
         self.statusBar().showMessage("正在检查本地工作区…")
+        self.mail_controller.status.connect(self.statusBar().showMessage)
         self._build_menu()
         QTimer.singleShot(0, self.initialize)
 
@@ -102,20 +116,20 @@ class MainWindow(QMainWindow):
         today = self._page("今日", QDate.currentDate().toString("yyyy年M月d日"))
         today.addWidget(text_label("先建立一个安心的科研工作区", 19, True))
         today.addWidget(
-            text_label(
-                "这里将汇集审稿、投稿与合作邮件中的待办。当前版本已建立本地数据库和隐私边界。"
-            )
+            text_label("在设置中添加163邮箱，即可只读同步并查看邮件。科研任务提取将在 M2 提供。")
         )
         today.addStretch()
         today.addWidget(text_label("开始之前", 16, True))
         today.addWidget(
-            text_label("01  了解本地存储与隐私规则\n02  查看设置与诊断\n03  等待 M1 邮箱接入")
+            text_label("01  设置邮箱与客户端授权码\n02  测试连接并选择目录\n03  只读同步到本机")
         )
         settings = QPushButton("查看工作区设置")
         settings.clicked.connect(lambda: self.navigation.setCurrentRow(5))
         today.addWidget(settings, alignment=Qt.AlignmentFlag.AlignLeft)
+        mail_layout = self._page("邮件", "服务器邮件只读 · 正文按纯文本显示")
+        self.mail_browser = MailBrowser(self.mail_controller)
+        mail_layout.addWidget(self.mail_browser, 1)
         for title, subtitle, body in (
-            ("邮件", "邮箱接入将在 M1 提供", "尚未连接邮箱\n\n连接后将在这里显示只读同步的邮件。"),
             (
                 "审稿与投稿",
                 "科研邮件分析将在 M2 提供",
@@ -133,6 +147,8 @@ class MainWindow(QMainWindow):
             layout.addWidget(text_label(body, 16), alignment=Qt.AlignmentFlag.AlignCenter)
             layout.addStretch()
         layout = self._page("设置", "本机数据与诊断")
+        self.account_editor = AccountEditor(self.mail_controller)
+        layout.addWidget(self.account_editor)
         layout.addWidget(text_label("隐私规则", 17, True))
         layout.addWidget(text_label("默认本地处理；保密级别未知时按敏感处理。云端处理需明确授权。"))
         layout.addWidget(text_label("本地数据", 17, True))
@@ -154,7 +170,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(text_label("功能进度", 17, True))
         layout.addWidget(
             text_label(
-                "M1：邮箱账户、Keychain、连接测试与同步周期\n"
+                "已支持：邮箱账户、Keychain、只读同步与邮件浏览\n"
                 "M2：本地与云端模型、认证、提醒\nM3：草稿编辑、审批与受控发送"
             )
         )
@@ -164,7 +180,7 @@ class MainWindow(QMainWindow):
         row.addWidget(wizard_button)
         row.addStretch()
         layout.addLayout(row)
-        layout.addWidget(text_label(f"ResearchMail Agent {__version__} · M0 工程预览", 12))
+        layout.addWidget(text_label(f"ResearchMail Agent {__version__} · M1 开发版", 12))
         layout.addWidget(
             text_label("使用系统外观。无需 Ollama 即可启动；当前没有启用任何模型。", 12)
         )
@@ -211,6 +227,7 @@ class MainWindow(QMainWindow):
         self.storage_status.setText(f"数据库正常 · 迁移版本 {state.schema_version} · WAL 已启用")
         self.statusBar().showMessage("本地工作区已就绪 · 尚未连接邮箱")
         self.backup_button.setEnabled(True)
+        self.mail_controller.refresh()
         self._event(Event.STARTUP_OK)
         if not state.onboarding_completed:
             self.show_onboarding()
@@ -275,8 +292,9 @@ class MainWindow(QMainWindow):
         self._event(Event.BACKUP_FAILED)
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self.jobs:
-            self.statusBar().showMessage("正在完成本地数据操作，请稍后再退出。")
+        if self.jobs or self.mail_controller.jobs:
+            self.mail_controller.cancel.set()
+            self.statusBar().showMessage("正在停止操作，请等待本次网络请求结束后再退出。")
             event.ignore()
             return
         if self.wizard is not None:
