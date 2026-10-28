@@ -1,13 +1,13 @@
 # ResearchMail Agent
 
-面向科研人员的 macOS 邮件助理，按里程碑开发。当前为 **M2 / 0.3.0 AI 邮件管理开发版**。
+面向科研人员的 macOS 邮件助理，按里程碑开发。当前为 **M3 / 0.4.0 草稿审批开发版**。
 
 已实现只读邮箱同步、Keychain、模型配置、隐私路由、分类摘要、证据校验、任务确认与应用内提醒。
-支持本机 Ollama 和 OpenAI 兼容的云端 API。服务器邮件始终只读，当前没有 SMTP 发送路径。
+支持本机 Ollama 和 OpenAI 兼容的云端 API。收件箱同步始终只读，发信必须经过人工审核、批准和本次确认。
 
 ## 本机安装开发版
 
-构建产物位于 `dist/ResearchMailAgent-0.3.0-arm64-dev.dmg`（本次交付 arm64）。
+构建产物位于 `dist/ResearchMailAgent-0.4.0-arm64-dev.dmg`（本次交付 arm64）。
 打开 DMG，将 ResearchMailAgent.app 拖到 Applications，然后打开应用，无需安装 Python、uv 或 Ollama。
 这是 ad-hoc 签名、未公证的本地开发版，不能视为正式 Developer ID 分发版本。
 本次已在 macOS 26.1 实机验证；其他系统和另一种 CPU 架构尚未实机验证。
@@ -43,7 +43,32 @@
 
 项目 `skills/` 是七个版本化科研 Skill 的唯一源文件，通过 wheel 与应用资源打包。
 内部工具注册表提供 JSON Schema；模型不能修改任务、草稿、设置、读取其他邮件或调用发送。
-模型输出不会被当作工具调用执行。显式用户工具可创建本地 DRAFT，编辑审批界面将在 M3 提供。
+模型输出不会被当作工具调用执行。显式用户工具可创建本地 DRAFT；发送工具还须持有本次确认令牌，模型始终无权发送。
+
+## 草稿与发送
+
+“草稿”页支持新建纯文本草稿、按你填写的意图创建回复，或选择本机模型生成回复。
+此阶段模型生成仅支持本机 Ollama，云端默认模型也不会接收草稿生成内容。模型只输出主题和
+正文，收件人来自所选邮件的发件人或由你输入，不会自动添加抄送、附件或引用原文。
+当前回复不处理 Reply-To、In-Reply-To/References 线程头；需要时手工核对收件人。
+模型生成是待审核建议，可能出现语言或语义偏差，不会自动批准或发送。
+
+保存后依次执行“核对并标记审核”→“批准当前版本”→“发送已批准版本”。每一步预览完整内容、
+收件人、发件账户和 SMTP SSL 地址，默认取消。修改收件人、主题、正文、账户或发件配置会
+使审批失效。未保存修改时不能切换草稿或发送，可保存或撤销；关闭窗口也会先保留未保存内容。
+
+设置页可测试已保存账户的 SMTP SSL 认证；此测试不提交 MAIL/RCPT/DATA。
+发送复用该账户的 Keychain 授权码。全部收件人都被服务器接受后才提交正文；某个地址拒绝时
+取消整封提交。SMTP成功只表示服务器接受，不保证最终送达，也不自动追加到IMAP“已发送”。
+
+草稿按 `DRAFT → REVIEWED → APPROVED → SENDING → SENT` 流转。连接或认证等正文提交前
+失败进入 FAILED，须点击“失败后重新审核”并重新批准。正文提交后超时、断线或进程中断进入
+UNCERTAIN（结果待核实），该草稿不能编辑或重发，需在服务商或向收件人核查并另行处理。
+没有自动重试，也不承诺网络邮件的端到端 exactly-once 送达。
+
+发送前原子记录 SENDING 和尝试ID，使用跨进程文件锁及版本校验，阻止重复点击和并发发送。
+重启仅在无活动发送占用文件锁时把中断状态转为待核实。审计记录固定事件、版本摘要和发送
+信封快照于本机数据库；不会把授权码、主题、正文或异常响应写入事件日志。
 
 ## 开发运行
 
@@ -63,7 +88,7 @@ bash scripts/check.sh
 uv run --locked python scripts/gui_smoke.py
 uv build --wheel
 bash scripts/build_dmg.sh
-uv run --locked python scripts/verify_bundle.py --dmg dist/ResearchMailAgent-0.3.0-arm64-dev.dmg
+uv run --locked python scripts/verify_bundle.py --dmg dist/ResearchMailAgent-0.4.0-arm64-dev.dmg
 ```
 
 所有测试使用合成数据和临时数据库。GUI 测试默认由检查脚本以 offscreen 平台执行，
@@ -96,9 +121,9 @@ UIDVALIDITY 变化会保留旧缓存，当前邮件列表只显示新的目录�
 | M0 | 工程、基础 GUI、存储、测试、CI | 本地验收通过；远端状态见阶段交付记录 |
 | M1 | 163 Keychain、只读增量同步、开发 DMG | 已交付；M2阶段已完成本机真实163只读联调 |
 | M2 | 本地/云端模型、分类、Skills、任务与提醒 | 本地验收与构建；远端结果见交付记录 |
-| M3 | 草稿审批、受控 SMTP、防重复发送 | 未开始 |
+| M3 | 草稿审批、受控 SMTP、防重复发送 | 本地开发验收；真实发送需在应用明确确认 |
 | M4 | Developer ID、公证、正式 DMG、Release | 未开始 |
 
 参阅 [架构](docs/architecture.md)、[环境检测](docs/environment.md)、
 [设计依据](docs/design.md)、[使用说明](docs/user-guide.md)、[M0 报告](docs/M0-report.md)、
-[M1 报告](docs/M1-report.md) 和 [M2 报告](docs/M2-report.md)。
+[M1 报告](docs/M1-report.md)、[M2 报告](docs/M2-report.md) 和 [M3 报告](docs/M3-report.md)。

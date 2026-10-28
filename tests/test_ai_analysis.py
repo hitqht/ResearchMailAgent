@@ -297,7 +297,7 @@ def test_m1_upgrade_keeps_messages_and_credential_refs(paths):
     )
     backup = paths.data / "before-m2.sqlite3"
     db.backup(backup)
-    assert db.initialize() == 4
+    assert db.initialize() == len(packaged_migrations())
     assert mail.account(account).credential_ref == "synthetic-existing-ref"
     assert mail.messages(account, "INBOX")[0].uid == 42
     assert AIRepository(db).preferences().local_first

@@ -1,11 +1,13 @@
 import json
 from datetime import date
 from enum import StrEnum
-from typing import Literal, cast
+from typing import Literal
 
 from pydantic import Field, ValidationError
 
+from researchmail.drafts.models import DraftContent
 from researchmail.llm.models import AIError, Contract, TaskSuggestion
+from researchmail.services.draft_service import DraftService
 from researchmail.storage.ai_repository import AIRepository
 from researchmail.storage.database import Database
 from researchmail.storage.mail_repository import MailRepository
@@ -47,10 +49,16 @@ class UpdateTask(Contract):
 
 
 class CreateDraft(Contract):
+    account_id: int | None = Field(default=None, gt=0)
     message_id: int | None = Field(default=None, gt=0)
     recipients: tuple[str, ...] = Field(max_length=30)
     subject: str = Field(max_length=1000)
     body: str = Field(max_length=200000)
+
+
+class SendApproved(Contract):
+    draft_id: int = Field(gt=0)
+    confirmation_token: str = Field(min_length=20, max_length=200)
 
 
 SCHEMAS: dict[str, type[Contract]] = {
@@ -61,14 +69,16 @@ SCHEMAS: dict[str, type[Contract]] = {
     "tasks.create_local": CreateTask,
     "tasks.update_local": UpdateTask,
     "drafts.create_local": CreateDraft,
+    "mail.send_approved": SendApproved,
 }
 
 
 class ToolRegistry:
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, draft_service: DraftService | None = None) -> None:
         self.database = database
         self.repository = AIRepository(database)
         self.mail = MailRepository(database)
+        self.drafts = draft_service if draft_service is not None else DraftService(database)
 
     def schemas(self) -> list[dict[str, object]]:
         return [
@@ -121,17 +131,7 @@ class ToolRegistry:
             )
             return True
         if isinstance(args, CreateDraft):
-            with self.database.transaction() as conn:
-                cur = conn.execute(
-                    "INSERT INTO drafts(message_id,recipients_json,subject,body_text) "
-                    "VALUES (?,?,?,?)",
-                    (args.message_id, json.dumps(args.recipients), args.subject, args.body),
-                )
-                draft_id = cast(int, cur.lastrowid)
-                conn.execute(
-                    "INSERT INTO audit_events(event,entity_type,entity_id,outcome) "
-                    "VALUES ('draft_created','draft',?,'success')",
-                    (draft_id,),
-                )
-            return draft_id
+            return self.drafts.repository.create(DraftContent.model_validate(args.model_dump()))
+        if isinstance(args, SendApproved):
+            return self.drafts.send_approved(args.draft_id, args.confirmation_token)
         return self.repository.tasks()

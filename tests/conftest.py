@@ -58,3 +58,14 @@ def ai(service):
         "synthetic-key",
     )
     return result, mock, vault, local, cloud
+
+
+@pytest.fixture
+def drafts(service, ai):
+    from researchmail.services.draft_service import DraftService
+    from tests.fakes import MemoryVault
+    from tests.test_drafts import RecordingTransport
+
+    engine = DraftService(service.database, MemoryVault(), RecordingTransport(), ai[0])
+    engine.vault.set("unused", "synthetic-smtp")
+    return engine

@@ -23,11 +23,14 @@ from researchmail import __version__
 from researchmail.eventlog import Event, EventLog
 from researchmail.gui.ai_controller import AIController, AISnapshot
 from researchmail.gui.ai_widgets import AnalysisPanel, ModelEditor, TaskPanel
+from researchmail.gui.draft_controller import DraftController
+from researchmail.gui.draft_widgets import DraftPanel
 from researchmail.gui.mail_controller import MailController
 from researchmail.gui.mail_widgets import AccountEditor, MailBrowser
 from researchmail.gui.onboarding import OnboardingWizard
 from researchmail.gui.worker import Worker
 from researchmail.services.ai_service import AIService
+from researchmail.services.draft_service import DraftService
 from researchmail.services.mail_service import MailService
 from researchmail.services.workspace import WorkspaceService, WorkspaceState
 
@@ -52,6 +55,7 @@ class MainWindow(QMainWindow):
         event_log: EventLog | None = None,
         mail_service: MailService | None = None,
         ai_service: AIService | None = None,
+        draft_service: DraftService | None = None,
     ) -> None:
         super().__init__()
         self.service = service
@@ -64,6 +68,13 @@ class MainWindow(QMainWindow):
         )
         self.ai_controller = AIController(
             ai_service if ai_service is not None else AIService(service.database), self.pool, self
+        )
+        self.draft_controller = DraftController(
+            draft_service
+            if draft_service is not None
+            else DraftService(service.database, ai=self.ai_controller.service),
+            self.pool,
+            self,
         )
         self.jobs: set[Worker] = set()
         self.wizard: OnboardingWizard | None = None
@@ -87,8 +98,8 @@ class MainWindow(QMainWindow):
         self.navigation.addItems(NAVIGATION)
         self.navigation.setSpacing(7)
         side_layout.addWidget(self.navigation)
-        side_layout.addWidget(text_label(f"M2 开发版 · {__version__}", 11))
-        side_layout.addWidget(text_label("本地缓存 · 邮箱 SSL 只读", 11))
+        side_layout.addWidget(text_label(f"M3 开发版 · {__version__}", 11))
+        side_layout.addWidget(text_label("收信只读 · 发信需审批", 11))
         splitter.addWidget(sidebar)
 
         self.pages = QStackedWidget()
@@ -97,10 +108,12 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         self._build_pages()
         self.navigation.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.navigation.currentRowChanged.connect(self._draft_navigation)
         self.navigation.setCurrentRow(0)
         self.statusBar().showMessage("正在检查本地工作区…")
         self.mail_controller.status.connect(self.statusBar().showMessage)
         self.ai_controller.status.connect(self.statusBar().showMessage)
+        self.draft_controller.status.connect(self.statusBar().showMessage)
         self.ai_controller.reminder.connect(self._reminder)
         self.ai_controller.changed.connect(self._ai_changed)
         self._build_menu()
@@ -147,12 +160,19 @@ class MainWindow(QMainWindow):
         task_layout = self._page("待办", "区分邀请回复、审稿报告、退修和校样期限")
         self.task_panel = TaskPanel(self.ai_controller)
         task_layout.addWidget(self.task_panel, 1)
-        drafts = self._page("草稿", "草稿编辑与审批将在 M3 提供")
-        drafts.addWidget(text_label("当前没有邮件发送路径。内部工具仅可创建本地 DRAFT。"))
-        drafts.addStretch()
+        drafts = self._page("草稿", "草稿编辑、人工审核与受控发送")
+        drafts.setSpacing(10)
+        drafts.setContentsMargins(28, 24, 28, 24)
+        self.draft_panel = DraftPanel(
+            self.draft_controller, self.mail_controller, self.ai_controller
+        )
+        drafts.addWidget(self.draft_panel, 1)
         layout = self._page("设置", "本机数据与诊断")
         self.account_editor = AccountEditor(self.mail_controller)
         layout.addWidget(self.account_editor)
+        smtp_test = QPushButton("测试已保存账户的 SMTP 认证（不发送）")
+        smtp_test.clicked.connect(self._smtp_test)
+        layout.addWidget(smtp_test)
         self.model_editor = ModelEditor(self.ai_controller)
         layout.addWidget(self.model_editor)
         layout.addWidget(text_label("隐私规则", 17, True))
@@ -177,7 +197,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(
             text_label(
                 "已支持：只读邮箱、Keychain、本地与云端模型、分类摘要、任务确认与应用内提醒\n"
-                "M3：草稿编辑、审批与受控发送"
+                "已支持：本地草稿生成、编辑、审核、审批与受控 SMTP 发送\n"
+                "M4：Developer ID 签名、公证与正式分发"
             )
         )
         row = QHBoxLayout()
@@ -186,7 +207,7 @@ class MainWindow(QMainWindow):
         row.addWidget(wizard_button)
         row.addStretch()
         layout.addLayout(row)
-        layout.addWidget(text_label(f"ResearchMail Agent {__version__} · M2 开发版", 12))
+        layout.addWidget(text_label(f"ResearchMail Agent {__version__} · M3 开发版", 12))
         layout.addWidget(
             text_label("使用系统外观。无需 Ollama 即可启动；模型需在本机配置后启用。", 12)
         )
@@ -235,6 +256,7 @@ class MainWindow(QMainWindow):
         self.backup_button.setEnabled(True)
         self.mail_controller.refresh()
         self.ai_controller.refresh()
+        self.draft_controller.refresh(recover=True)
         self._event(Event.STARTUP_OK)
         if not state.onboarding_completed:
             self.show_onboarding()
@@ -298,6 +320,19 @@ class MainWindow(QMainWindow):
         self.backup_button.setEnabled(True)
         self._event(Event.BACKUP_FAILED)
 
+    @Slot()
+    def _smtp_test(self) -> None:
+        account_id = self.account_editor.account_id
+        if account_id is not None:
+            self.draft_controller.test_smtp(account_id)
+        else:
+            self.statusBar().showMessage("请先保存并选择发件账户。")
+
+    @Slot(int)
+    def _draft_navigation(self, row: int) -> None:
+        if row == 4 and self.ready and not self.draft_panel.dirty:
+            self.draft_controller.refresh()
+
     @Slot(object)
     def _ai_changed(self, value: object) -> None:
         if isinstance(value, AISnapshot):
@@ -309,7 +344,16 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("有已确认任务临近截止，请查看今日页。")
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self.jobs or self.mail_controller.jobs or self.ai_controller.jobs:
+        if self.draft_panel.dirty:
+            self.statusBar().showMessage("草稿有未保存修改。请先保存，或点击撤销未保存修改后退出。")
+            event.ignore()
+            return
+        if (
+            self.jobs
+            or self.mail_controller.jobs
+            or self.ai_controller.jobs
+            or self.draft_controller.jobs
+        ):
             self.mail_controller.cancel.set()
             self.statusBar().showMessage("正在停止操作，请等待本次网络请求结束后再退出。")
             event.ignore()

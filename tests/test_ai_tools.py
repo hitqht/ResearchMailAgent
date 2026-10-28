@@ -7,7 +7,7 @@ from researchmail.tools.registry import SCHEMAS, Origin, ToolRegistry
 def test_schema_contracts_and_denied_model_mutations(ai, service):
     registry = ToolRegistry(service.database)
     assert {s["name"] for s in registry.schemas()} == set(SCHEMAS)
-    assert "mail.send_approved" not in SCHEMAS
+    assert "mail.send_approved" in SCHEMAS
     for name in (*SCHEMAS, "mail.send_approved", "shell.exec", "settings.update"):
         if name == "mail.get_message":
             continue
@@ -57,5 +57,5 @@ def test_user_local_tools_no_send_path(ai, service):
         assert (
             conn.execute("SELECT status FROM drafts WHERE id=?", (draft,)).fetchone()[0] == "DRAFT"
         )
-    with pytest.raises(AIError, match="denied"):
+    with pytest.raises(AIError, match="config"):
         registry.call("mail.send_approved", dict(draft_id=draft), origin=Origin.USER)

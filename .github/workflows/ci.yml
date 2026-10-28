@@ -1,4 +1,4 @@
-name: M2 checks
+name: M3 checks
 on:
   push:
   pull_request:
@@ -8,6 +8,9 @@ jobs:
   quality:
     runs-on: macos-15-intel
     timeout-minutes: 25
+    env:
+      UV_HTTP_TIMEOUT: "120"
+      UV_HTTP_CONNECT_TIMEOUT: "30"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,13 +26,13 @@ jobs:
           QT_QPA_PLATFORM: offscreen
       - run: uv build --wheel
       - run: bash scripts/build_dmg.sh
-      - run: uv run --locked python scripts/verify_bundle.py --dmg "dist/ResearchMailAgent-0.3.0-$(uname -m)-dev.dmg"
+      - run: uv run --locked python scripts/verify_bundle.py --dmg "dist/ResearchMailAgent-0.4.0-$(uname -m)-dev.dmg"
         env:
           QT_QPA_PLATFORM: offscreen
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: m2-validation
+          name: m3-validation
           path: |
             artifacts/gui/
             coverage.xml

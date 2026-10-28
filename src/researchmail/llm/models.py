@@ -137,3 +137,8 @@ class Preferences(Contract):
     local_first: bool = True
     reminders: bool = False
     reminder_days: int = Field(default=3, ge=0, le=30)
+
+
+class GeneratedDraft(Contract):
+    subject: str = Field(min_length=1, max_length=1000)
+    body: str = Field(min_length=1, max_length=200000)

@@ -15,8 +15,7 @@ cleanup() {
 trap cleanup EXIT
 ditto dist/ResearchMailAgent.app "$STAGE/ResearchMailAgent.app"
 ln -s /Applications "$STAGE/Applications"
-hdiutil create -volname "ResearchMailAgent ${VERSION} Dev" -srcfolder "$STAGE" \
-  -format UDZO -ov -o "$DMG"
+bash scripts/create_dmg.sh "$STAGE" "$DMG" "ResearchMailAgent ${VERSION} Dev"
 hdiutil verify "$DMG"
 hdiutil attach -nobrowse -readonly -plist "$DMG" > artifacts/dmg-mount.plist
 MOUNT="$(uv run --locked python - <<'PY'

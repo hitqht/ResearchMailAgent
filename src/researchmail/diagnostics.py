@@ -9,12 +9,14 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import QApplication, QScrollArea
 
 from researchmail.config import AppPaths
+from researchmail.drafts.models import DraftContent
 from researchmail.gui.window import MainWindow
 from researchmail.llm.models import ModelConfig
 from researchmail.llm.providers import MockProvider
 from researchmail.mail.models import AccountConfig, Folder, ParsedMessage
 from researchmail.services.ai_service import AIService
 from researchmail.services.workspace import WorkspaceService
+from researchmail.storage.draft_repository import DraftRepository
 from researchmail.storage.mail_repository import MailRepository
 
 
@@ -91,39 +93,58 @@ def self_test(output: Path, appearance: str = "system") -> int:
         )
         ai.analyze(1, model)
         ai.repository.update_task(ai.repository.tasks()[0].id, "confirmed")
+        DraftRepository(service.database).create(
+            DraftContent(
+                account_id=account,
+                message_id=1,
+                recipients=("editor@example.invalid",),
+                subject="Re: 论文修改说明（合成草稿）",
+                body="编辑您好：\n\n这是一封仅供界面测试的合成草稿。\n请人工核对内容后再审批。",
+            )
+        )
         window = MainWindow(service, ai_service=ai)
         window.show()
 
+        plan = [
+            (0, "today"),
+            (1, "mail"),
+            (2, "analysis"),
+            (3, "tasks"),
+            (4, "drafts"),
+            (5, "settings"),
+            (5, "settings-models"),
+        ]
+        cursor = 0
+        saved = True
+
         def capture() -> None:
+            nonlocal cursor, saved
             if (
                 not window.ready
                 or window.jobs
                 or window.mail_controller.jobs
                 or window.ai_controller.jobs
+                or window.draft_controller.jobs
             ):
                 return
             if window.wizard is not None:
                 window.wizard.grab().save(str(output / "onboarding.png"))
                 window.wizard.reject()
-            saved = window.grab().save(str(output / "today.png"))
-            window.navigation.setCurrentRow(1)
-            window.mail_browser.messages.setCurrentRow(0)
-            app.processEvents()
-            saved = window.grab().save(str(output / "mail.png")) and saved
-            window.navigation.setCurrentRow(2)
-            app.processEvents()
-            saved = window.grab().save(str(output / "analysis.png")) and saved
-            window.navigation.setCurrentRow(3)
-            app.processEvents()
-            saved = window.grab().save(str(output / "tasks.png")) and saved
-            window.navigation.setCurrentRow(5)
-            app.processEvents()
-            saved = window.grab().save(str(output / "settings.png")) and saved
-            settings = window.pages.widget(5)
-            if isinstance(settings, QScrollArea):
-                settings.ensureWidgetVisible(window.model_editor)
+            if cursor < len(plan):
+                row, name = plan[cursor]
+                window.navigation.setCurrentRow(row)
+                if window.draft_controller.jobs:
+                    return
+                if name == "mail":
+                    window.mail_browser.messages.setCurrentRow(0)
+                if name == "settings-models":
+                    settings = window.pages.widget(5)
+                    if isinstance(settings, QScrollArea):
+                        settings.ensureWidgetVisible(window.model_editor)
                 app.processEvents()
-                saved = window.grab().save(str(output / "settings-models.png")) and saved
+                saved = window.grab().save(str(output / (name + ".png"))) and saved
+                cursor += 1
+                return
             backup = service.backup()
             outcome.update(
                 ok=saved and backup.exists(),
