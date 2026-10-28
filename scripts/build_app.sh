@@ -13,6 +13,7 @@ uv run --locked pyinstaller --clean --noconfirm --onedir --windowed \
   --osx-bundle-identifier io.github.hitqht.ResearchMailAgent \
   --workpath build/pyinstaller --specpath build \
   --collect-data researchmail.storage.migrations \
+  --add-data "$PWD/skills:researchmail/research_skills" \
   --hidden-import keyring.backends.macOS \
   --exclude-module tkinter --exclude-module PySide6.QtQml \
   --exclude-module PySide6.QtQuick packaging/launcher.py

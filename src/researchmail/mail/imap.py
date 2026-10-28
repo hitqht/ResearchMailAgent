@@ -160,10 +160,24 @@ class IMAPSession:
         if len(literals) != 1:
             raise MailError(Failure.PROTOCOL)
         info, raw = literals[0]
-        found_uid = re.search(rb"\bUID (\d+)\b", info)
-        if not found_uid or int(found_uid.group(1)) != uid or len(raw) != size:
+        # FETCH attributes have no mandated order; UID can follow the literal.
+        framing = b" ".join(
+            item[0] if isinstance(item, tuple) else item
+            for item in data
+            if isinstance(item, (bytes, tuple))
+        )
+        found_uids = {int(value) for value in re.findall(rb"\bUID (\d+)\b", framing, re.I)}
+        declared = re.search(rb"BODY\[\](?:<0>)?\s+\{(\d+)\}$", info, re.I)
+        if (
+            found_uids != {uid}
+            or declared is None
+            or int(declared.group(1)) != len(raw)
+            or len(raw) > MAX_MESSAGE_BYTES
+        ):
             raise MailError(Failure.PROTOCOL)
-        return size, raw
+        # Some 163 messages report a different RFC822.SIZE. The bounded request is
+        # larger than any accepted body, so an accepted, framed literal is complete.
+        return len(raw), raw
 
     def close(self) -> None:
         # Never CLOSE: CLOSE may expunge a mailbox; LOGOUT does not.

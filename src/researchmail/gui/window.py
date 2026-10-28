@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -20,10 +21,13 @@ from PySide6.QtWidgets import (
 
 from researchmail import __version__
 from researchmail.eventlog import Event, EventLog
+from researchmail.gui.ai_controller import AIController, AISnapshot
+from researchmail.gui.ai_widgets import AnalysisPanel, ModelEditor, TaskPanel
 from researchmail.gui.mail_controller import MailController
 from researchmail.gui.mail_widgets import AccountEditor, MailBrowser
 from researchmail.gui.onboarding import OnboardingWizard
 from researchmail.gui.worker import Worker
+from researchmail.services.ai_service import AIService
 from researchmail.services.mail_service import MailService
 from researchmail.services.workspace import WorkspaceService, WorkspaceState
 
@@ -47,6 +51,7 @@ class MainWindow(QMainWindow):
         service: WorkspaceService,
         event_log: EventLog | None = None,
         mail_service: MailService | None = None,
+        ai_service: AIService | None = None,
     ) -> None:
         super().__init__()
         self.service = service
@@ -56,6 +61,9 @@ class MainWindow(QMainWindow):
             mail_service if mail_service is not None else MailService(service.database),
             self.pool,
             self,
+        )
+        self.ai_controller = AIController(
+            ai_service if ai_service is not None else AIService(service.database), self.pool, self
         )
         self.jobs: set[Worker] = set()
         self.wizard: OnboardingWizard | None = None
@@ -79,7 +87,7 @@ class MainWindow(QMainWindow):
         self.navigation.addItems(NAVIGATION)
         self.navigation.setSpacing(7)
         side_layout.addWidget(self.navigation)
-        side_layout.addWidget(text_label(f"M1 开发版 · {__version__}", 11))
+        side_layout.addWidget(text_label(f"M2 开发版 · {__version__}", 11))
         side_layout.addWidget(text_label("本地缓存 · 邮箱 SSL 只读", 11))
         splitter.addWidget(sidebar)
 
@@ -92,6 +100,9 @@ class MainWindow(QMainWindow):
         self.navigation.setCurrentRow(0)
         self.statusBar().showMessage("正在检查本地工作区…")
         self.mail_controller.status.connect(self.statusBar().showMessage)
+        self.ai_controller.status.connect(self.statusBar().showMessage)
+        self.ai_controller.reminder.connect(self._reminder)
+        self.ai_controller.changed.connect(self._ai_changed)
         self._build_menu()
         QTimer.singleShot(0, self.initialize)
 
@@ -114,41 +125,36 @@ class MainWindow(QMainWindow):
 
     def _build_pages(self) -> None:
         today = self._page("今日", QDate.currentDate().toString("yyyy年M月d日"))
-        today.addWidget(text_label("先建立一个安心的科研工作区", 19, True))
-        today.addWidget(
-            text_label("在设置中添加163邮箱，即可只读同步并查看邮件。科研任务提取将在 M2 提供。")
-        )
-        today.addStretch()
-        today.addWidget(text_label("开始之前", 16, True))
-        today.addWidget(
-            text_label("01  设置邮箱与客户端授权码\n02  测试连接并选择目录\n03  只读同步到本机")
-        )
+        today.addWidget(text_label("已确认任务与近期截止", 19, True))
+        self.reminder_label = text_label("提醒可在设置中开启；仅在应用运行期间显示。")
+        today.addWidget(self.reminder_label)
+        self.daily_digest = QPlainTextEdit()
+        self.daily_digest.setReadOnly(True)
+        self.daily_digest.setPlaceholderText("确认任务后，在此查看本地日报。")
+        today.addWidget(self.daily_digest, 1)
+        refresh = QPushButton("刷新本地日报")
+        refresh.clicked.connect(self.ai_controller.refresh)
+        today.addWidget(refresh, alignment=Qt.AlignmentFlag.AlignLeft)
         settings = QPushButton("查看工作区设置")
         settings.clicked.connect(lambda: self.navigation.setCurrentRow(5))
         today.addWidget(settings, alignment=Qt.AlignmentFlag.AlignLeft)
         mail_layout = self._page("邮件", "服务器邮件只读 · 正文按纯文本显示")
         self.mail_browser = MailBrowser(self.mail_controller)
         mail_layout.addWidget(self.mail_browser, 1)
-        for title, subtitle, body in (
-            (
-                "审稿与投稿",
-                "科研邮件分析将在 M2 提供",
-                "尚无科研事项\n\n邀请回复、审稿报告、退修和校样期限将分别呈现。",
-            ),
-            (
-                "待办",
-                "任务提取与提醒将在 M2 提供",
-                "尚无待办\n\n邮件中提取的任务需要你确认；不确定的日期将保留为空。",
-            ),
-            ("草稿", "草稿与审批将在 M3 提供", "尚无草稿\n\n当前版本没有邮件发送路径。"),
-        ):
-            layout = self._page(title, subtitle)
-            layout.addStretch()
-            layout.addWidget(text_label(body, 16), alignment=Qt.AlignmentFlag.AlignCenter)
-            layout.addStretch()
+        review_layout = self._page("审稿与投稿", "分析缓存邮件 · 原文证据与任务建议")
+        self.analysis_panel = AnalysisPanel(self.ai_controller, self.mail_controller)
+        review_layout.addWidget(self.analysis_panel, 1)
+        task_layout = self._page("待办", "区分邀请回复、审稿报告、退修和校样期限")
+        self.task_panel = TaskPanel(self.ai_controller)
+        task_layout.addWidget(self.task_panel, 1)
+        drafts = self._page("草稿", "草稿编辑与审批将在 M3 提供")
+        drafts.addWidget(text_label("当前没有邮件发送路径。内部工具仅可创建本地 DRAFT。"))
+        drafts.addStretch()
         layout = self._page("设置", "本机数据与诊断")
         self.account_editor = AccountEditor(self.mail_controller)
         layout.addWidget(self.account_editor)
+        self.model_editor = ModelEditor(self.ai_controller)
+        layout.addWidget(self.model_editor)
         layout.addWidget(text_label("隐私规则", 17, True))
         layout.addWidget(text_label("默认本地处理；保密级别未知时按敏感处理。云端处理需明确授权。"))
         layout.addWidget(text_label("本地数据", 17, True))
@@ -170,8 +176,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(text_label("功能进度", 17, True))
         layout.addWidget(
             text_label(
-                "已支持：邮箱账户、Keychain、只读同步与邮件浏览\n"
-                "M2：本地与云端模型、认证、提醒\nM3：草稿编辑、审批与受控发送"
+                "已支持：只读邮箱、Keychain、本地与云端模型、分类摘要、任务确认与应用内提醒\n"
+                "M3：草稿编辑、审批与受控发送"
             )
         )
         row = QHBoxLayout()
@@ -180,9 +186,9 @@ class MainWindow(QMainWindow):
         row.addWidget(wizard_button)
         row.addStretch()
         layout.addLayout(row)
-        layout.addWidget(text_label(f"ResearchMail Agent {__version__} · M1 开发版", 12))
+        layout.addWidget(text_label(f"ResearchMail Agent {__version__} · M2 开发版", 12))
         layout.addWidget(
-            text_label("使用系统外观。无需 Ollama 即可启动；当前没有启用任何模型。", 12)
+            text_label("使用系统外观。无需 Ollama 即可启动；模型需在本机配置后启用。", 12)
         )
         layout.addStretch()
 
@@ -228,6 +234,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("本地工作区已就绪 · 尚未连接邮箱")
         self.backup_button.setEnabled(True)
         self.mail_controller.refresh()
+        self.ai_controller.refresh()
         self._event(Event.STARTUP_OK)
         if not state.onboarding_completed:
             self.show_onboarding()
@@ -291,8 +298,18 @@ class MainWindow(QMainWindow):
         self.backup_button.setEnabled(True)
         self._event(Event.BACKUP_FAILED)
 
+    @Slot(object)
+    def _ai_changed(self, value: object) -> None:
+        if isinstance(value, AISnapshot):
+            self.daily_digest.setPlainText(value.digest)
+
+    @Slot(str)
+    def _reminder(self, text: str) -> None:
+        self.reminder_label.setText("截止提醒：" + text)
+        self.statusBar().showMessage("有已确认任务临近截止，请查看今日页。")
+
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self.jobs or self.mail_controller.jobs:
+        if self.jobs or self.mail_controller.jobs or self.ai_controller.jobs:
             self.mail_controller.cancel.set()
             self.statusBar().showMessage("正在停止操作，请等待本次网络请求结束后再退出。")
             event.ignore()

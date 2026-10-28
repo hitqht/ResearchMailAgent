@@ -53,7 +53,11 @@ def test_upgrade_preserves_existing_data(paths: AppPaths) -> None:
 def test_atomic_failed_migration_and_retry(paths: AppPaths) -> None:
     db = Database(paths.database)
     db.initialize()
-    broken = Migration(4, "004_broken.sql", "CREATE TABLE attempt(id);\nINVALID SQL;\n")
+    broken = Migration(
+        len(packaged_migrations()) + 1,
+        "next_broken.sql",
+        "CREATE TABLE attempt(id);\nINVALID SQL;\n",
+    )
     with pytest.raises(StorageError):
         db.initialize((*packaged_migrations(), broken))
     with db.connection() as conn:
@@ -63,8 +67,10 @@ def test_atomic_failed_migration_and_retry(paths: AppPaths) -> None:
         assert (
             conn.execute("SELECT name FROM sqlite_master WHERE name='attempt'").fetchone() is None
         )
-    repaired = Migration(4, "004_fixed.sql", "CREATE TABLE attempt(id INTEGER);\n")
-    assert db.initialize((*packaged_migrations(), repaired)) == 4
+    repaired = Migration(
+        len(packaged_migrations()) + 1, "next_fixed.sql", "CREATE TABLE attempt(id INTEGER);\n"
+    )
+    assert db.initialize((*packaged_migrations(), repaired)) == len(packaged_migrations()) + 1
     with pytest.raises(StorageError, match="newer"):
         db.initialize()
 
