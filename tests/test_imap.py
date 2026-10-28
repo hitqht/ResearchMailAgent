@@ -75,7 +75,7 @@ def test_bad_fetch_uid_length_and_expunge(adapter) -> None:
         session.fetch(1)
     client.uid.side_effect = [
         ("OK", [b"1 (UID 1 RFC822.SIZE 5)"]),
-        ("OK", [(b"1 (UID 1 BODY[] {3}", b"bad")]),
+        ("OK", [(b"1 (UID 1 BODY[] {4}", b"bad")]),
     ]
     with pytest.raises(MailError):
         session.fetch(1)
@@ -116,3 +116,22 @@ def test_literal_bound_before_allocation() -> None:
     client = object.__new__(imap.BoundedIMAP)
     with pytest.raises(MailError):
         client.read(MAX_MESSAGE_BYTES + 2)
+
+
+def test_server_size_discrepancy_with_valid_complete_literal(adapter):
+    session, client, _ = adapter
+    # Reproduces the observed 163 discrepancy using synthetic content only.
+    client.uid.side_effect = [
+        ("OK", [b"1 (UID 1 RFC822.SIZE 9)"]),
+        ("OK", [(b"1 (UID 1 BODY[]<0> {5}", b"hello"), b")"]),
+    ]
+    assert session.fetch(1) == (5, b"hello")
+
+
+def test_uid_may_follow_the_body_literal(adapter):
+    session, client, _ = adapter
+    client.uid.side_effect = [
+        ("OK", [b"1 (UID 1 RFC822.SIZE 5)"]),
+        ("OK", [(b"1 (BODY[]<0> {5}", b"hello"), b" UID 1)"]),
+    ]
+    assert session.fetch(1) == (5, b"hello")

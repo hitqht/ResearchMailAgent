@@ -6,11 +6,14 @@ import tempfile
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QScrollArea
 
 from researchmail.config import AppPaths
 from researchmail.gui.window import MainWindow
+from researchmail.llm.models import ModelConfig
+from researchmail.llm.providers import MockProvider
 from researchmail.mail.models import AccountConfig, Folder, ParsedMessage
+from researchmail.services.ai_service import AIService
 from researchmail.services.workspace import WorkspaceService
 from researchmail.storage.mail_repository import MailRepository
 
@@ -55,11 +58,49 @@ def self_test(output: Path, appearance: str = "system") -> int:
             None,
         )
         repo.finish_cursor(account, "INBOX")
-        window = MainWindow(service)
+        mock = MockProvider(
+            json.dumps(
+                {
+                    "category": "revision",
+                    "priority": "normal",
+                    "confidentiality": "sensitive",
+                    "summary": "这是一封本机界面测试邮件，提醒核对修改说明。",
+                    "evidence": ["所有内容均为合成数据。"],
+                    "confidence": 0.8,
+                    "tasks": [
+                        {
+                            "title": "核对修改说明（合成任务）",
+                            "deadline": None,
+                            "deadline_kind": "revision",
+                            "evidence": "所有内容均为合成数据。",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        )
+        ai = AIService(service.database, factory=lambda config, secret: mock)
+        model = ai.save_model(
+            ModelConfig(
+                label="本机模型（合成配置）",
+                provider="ollama",
+                model="synthetic-only",
+                base_url="http://127.0.0.1:11434",
+            ),
+            "",
+        )
+        ai.analyze(1, model)
+        ai.repository.update_task(ai.repository.tasks()[0].id, "confirmed")
+        window = MainWindow(service, ai_service=ai)
         window.show()
 
         def capture() -> None:
-            if not window.ready or window.jobs or window.mail_controller.jobs:
+            if (
+                not window.ready
+                or window.jobs
+                or window.mail_controller.jobs
+                or window.ai_controller.jobs
+            ):
                 return
             if window.wizard is not None:
                 window.wizard.grab().save(str(output / "onboarding.png"))
@@ -69,9 +110,20 @@ def self_test(output: Path, appearance: str = "system") -> int:
             window.mail_browser.messages.setCurrentRow(0)
             app.processEvents()
             saved = window.grab().save(str(output / "mail.png")) and saved
+            window.navigation.setCurrentRow(2)
+            app.processEvents()
+            saved = window.grab().save(str(output / "analysis.png")) and saved
+            window.navigation.setCurrentRow(3)
+            app.processEvents()
+            saved = window.grab().save(str(output / "tasks.png")) and saved
             window.navigation.setCurrentRow(5)
             app.processEvents()
             saved = window.grab().save(str(output / "settings.png")) and saved
+            settings = window.pages.widget(5)
+            if isinstance(settings, QScrollArea):
+                settings.ensureWidgetVisible(window.model_editor)
+                app.processEvents()
+                saved = window.grab().save(str(output / "settings-models.png")) and saved
             backup = service.backup()
             outcome.update(
                 ok=saved and backup.exists(),

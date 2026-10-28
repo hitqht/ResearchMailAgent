@@ -1,4 +1,4 @@
-name: M1 checks
+name: M2 checks
 on:
   push:
   pull_request:
@@ -23,13 +23,13 @@ jobs:
           QT_QPA_PLATFORM: offscreen
       - run: uv build --wheel
       - run: bash scripts/build_dmg.sh
-      - run: uv run --locked python scripts/verify_bundle.py --dmg "dist/ResearchMailAgent-0.2.0-$(uname -m)-dev.dmg"
+      - run: uv run --locked python scripts/verify_bundle.py --dmg "dist/ResearchMailAgent-0.3.0-$(uname -m)-dev.dmg"
         env:
           QT_QPA_PLATFORM: offscreen
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: m1-validation
+          name: m2-validation
           path: |
             artifacts/gui/
             coverage.xml

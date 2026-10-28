@@ -214,7 +214,7 @@ def test_upgrade_m0_keeps_account_and_cursor_data(paths) -> None:
             "INSERT INTO sync_cursors(account_id,folder,uidvalidity,last_uid) VALUES (?,?,?,?)",
             (1, "INBOX", 7, 42),
         )
-    assert db.initialize() == 3
+    assert db.initialize() == len(packaged_migrations())
     with db.connection() as conn:
         account = conn.execute("SELECT * FROM accounts").fetchone()
         assert account["email"] == "legacy@example.invalid"
