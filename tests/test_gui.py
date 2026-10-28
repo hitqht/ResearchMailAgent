@@ -15,7 +15,10 @@ from researchmail.services.workspace import WorkspaceService
 def wait_idle(qtbot: QtBot, window: MainWindow) -> None:
     qtbot.waitUntil(
         lambda: (
-            not window.jobs and not window.mail_controller.jobs and not window.ai_controller.jobs
+            not window.jobs
+            and not window.mail_controller.jobs
+            and not window.ai_controller.jobs
+            and not window.draft_controller.jobs
         ),
         timeout=10000,
     )

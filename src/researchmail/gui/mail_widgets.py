@@ -34,7 +34,7 @@ class AccountEditor(QWidget):
         self.accounts: list[Account] = []
         self.account_id: int | None = None
         layout = QVBoxLayout(self)
-        layout.addWidget(label("邮箱账户 · SSL 只读访问"))
+        layout.addWidget(label("邮箱账户 · 收信只读，发信需审批"))
         self.selector = QComboBox()
         self.selector.setAccessibleName("编辑邮箱账户")
         layout.addWidget(self.selector)
@@ -62,8 +62,8 @@ class AccountEditor(QWidget):
             ("显示名称", self.name),
             ("IMAP 服务器", self.imap_host),
             ("IMAP SSL 端口", self.imap_port),
-            ("SMTP 服务器（预留）", self.smtp_host),
-            ("SMTP SSL 端口（预留）", self.smtp_port),
+            ("SMTP 服务器", self.smtp_host),
+            ("SMTP SSL 端口", self.smtp_port),
             ("客户端授权码", self.secret),
             ("同步当前目录", self.interval),
         ):

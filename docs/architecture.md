@@ -1,5 +1,31 @@
 # ResearchMail 分层架构
 
+## M3 增量
+
+`gui/draft_widgets.py` → `gui/draft_controller.py` → `services/draft_service.py` →
+`storage/draft_repository.py` / `drafts/models.py` / `mail/smtp.py`。
+草稿、UI、审批摘要、SQL、模型提示及SMTP协议分开。模型生成调用AIService的仅本地方法，
+只接受subject/body契约，不能决定收件人、发件账户或任何执行权限。
+
+审批摘要包含草稿全部内容、版本、稳定Message-ID/Date、账户邮箱、SMTP主机/端口及Keychain引用。
+仓库事务内核对当前账户配置与摘要，严格要求REVIEWED再APPROVED。迁移5的触发器在内容或
+发件配置修改时清除审批；发送中/已发送/待核实的正文及收件信息不能修改。
+
+UI最后确认后生成内存单次令牌，绑定草稿ID、摘要，五分钟失效；工具注册表不能签发令牌。
+mail.send_approved仅允许受信任USER调用，同时仍经过DraftService令牌、状态、摘要和文件锁校验。
+审批不等于发送，生成不等于审批，模型始终不能调用发送工具。
+
+跨进程flock锁覆盖整个发送过程；SQLite IMMEDIATE事务原子claim APPROVED→SENDING。
+发送尝试先记录到本机数据库，信封快照保留历史发件身份和服务地址；数据提交前再落库阶段标记。
+SMTP_SSL验证证书，不使用明文或降级连接；MAIL及每个RCPT通过后才调用DATA。任何地址拒绝则RSET。
+提交前连接失败为FAILED，明确负面回复为FAILED；DATA阶段不确定异常为UNCERTAIN。
+明确250接受后QUIT失败不改变SENT；接受后数据库写入失败仍禁止重发，恢复时待核实。
+重启恢复持有全局文件锁，避免另一实例把活动发送错误地恢复；所有不确定状态均不自动重试。
+
+M3只发送纯文本，没有附件、抄送、SMTPUTF8地址、线程头、IMAP已发送副本或送达回执。
+本地文件锁与状态机保护同一草稿，不能证明跨不同草稿或服务商投递的端到端exactly-once。
+
+
 ## M2 增量
 
 `gui/ai_widgets.py` → `gui/ai_controller.py` → `services/ai_service.py` →
